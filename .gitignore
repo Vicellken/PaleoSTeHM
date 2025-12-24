@@ -163,3 +163,5 @@ cython_debug/
 **/.DS_Store
 HOLSEA/
 /PaleoSTeHM_UI/Holocene_Spatiotemporal_analysis/Outputs
+/.cursor
+/PaleoSTeHM_UI/Holocene_Spatiotemporal_analysis/Data

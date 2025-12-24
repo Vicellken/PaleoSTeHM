@@ -149,148 +149,217 @@ def implement_sp_gp_model(
     if seed is not None:
         set_seed(seed)
 
-    pyro.clear_param_store()
-    # define global temporal kernel
-    global_kernel = PSTHM.kernels.Matern32(input_dim=1, geo=False)
-    global_kernel.set_prior(
-        "lengthscale",
-        dist.Uniform(
-            torch.tensor(100.0, dtype=torch.float64),
-            torch.tensor(20000.0, dtype=torch.float64),
-        ),
-    )
-    global_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-5, dtype=torch.float64),
-            torch.tensor(1000.0, dtype=torch.float64),
-        ),
-    )
+    # NOTE:
+    # - `PSTHM.model.GPRegression_V` expects `noise` as observation *variance* (not std dev).
+    # - Some datasets/initial hyperparameters can make Kff nearly singular; we retry with
+    #   progressively larger `jitter` to keep Cholesky stable and deterministic.
 
-    # define regionally linar spatio-temporal kernel
-    regional_linear_temporal_kernel = PSTHM.kernels.Linear(input_dim=1)
-    regional_linear_temporal_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-12, dtype=torch.float64),
-            torch.tensor(1e-6, dtype=torch.float64),
-        ),
-    )
-    regional_linear_temporal_kernel.ref_year = torch.tensor(0.0, dtype=torch.float64)
-    regional_linear_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
-    regional_linear_spatial_kernel.set_prior(
-        "s_lengthscale",
-        dist.Uniform(
-            torch.tensor(0.01, dtype=torch.float64),
-            torch.tensor(0.5, dtype=torch.float64),
-        ),
-    )
-    regional_linear_kernel = PSTHM.kernels.Product(
-        regional_linear_temporal_kernel, regional_linear_spatial_kernel
-    )
+    def _build_gpr(jitter: float):
+        pyro.clear_param_store()
 
-    # define regionally non-linar spatio-temporal kernel
-    regional_nl_temporal_kernel = PSTHM.kernels.Matern32(
-        input_dim=1, lengthscale=global_kernel.lengthscale, geo=False
-    )
-    regional_nl_temporal_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-6, dtype=torch.float64),
-            torch.tensor(100.0, dtype=torch.float64),
-        ),
-    )
-    regional_nl_temporal_kernel.set_prior(
-        "lengthscale",
-        dist.Uniform(
-            torch.tensor(100.0, dtype=torch.float64),
-            torch.tensor(20000.0, dtype=torch.float64),
-        ),
-    )
-    regional_nl_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
-    regional_nl_spatial_kernel.set_prior(
-        "s_lengthscale",
-        dist.Uniform(
-            torch.tensor(0.01, dtype=torch.float64),
-            torch.tensor(0.5, dtype=torch.float64),
-        ),
-    )
-    regional_nl_kernel = PSTHM.kernels.Product(
-        regional_nl_temporal_kernel, regional_nl_spatial_kernel
-    )
+        # define global temporal kernel
+        global_kernel = PSTHM.kernels.Matern32(input_dim=1, geo=False)
+        global_kernel.set_prior(
+            "lengthscale",
+            dist.Uniform(
+                torch.tensor(100.0, dtype=torch.float64),
+                torch.tensor(20000.0, dtype=torch.float64),
+            ),
+        )
+        global_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-5, dtype=torch.float64),
+                torch.tensor(1000.0, dtype=torch.float64),
+            ),
+        )
 
-    # define regionally non-linar spatio-temporal kernel
-    local_nl_temporal_kernel = PSTHM.kernels.Matern32(
-        input_dim=1, lengthscale=global_kernel.lengthscale, geo=False
-    )
-    local_nl_temporal_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-6, dtype=torch.float64),
-            torch.tensor(1.0, dtype=torch.float64),
-        ),
-    )
-    local_nl_temporal_kernel.set_prior(
-        "lengthscale",
-        dist.Uniform(
-            torch.tensor(100.0, dtype=torch.float64),
-            torch.tensor(20000.0, dtype=torch.float64),
-        ),
-    )
-    local_nl_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
-    local_nl_spatial_kernel.set_prior(
-        "s_lengthscale",
-        dist.Uniform(
-            torch.tensor(0.001, dtype=torch.float64),
-            torch.tensor(0.01, dtype=torch.float64),
-        ),
-    )
-    local_nl_kernel = PSTHM.kernels.Product(
-        local_nl_temporal_kernel, local_nl_spatial_kernel
-    )
+        # define regionally linar spatio-temporal kernel
+        regional_linear_temporal_kernel = PSTHM.kernels.Linear(input_dim=1)
+        regional_linear_temporal_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-12, dtype=torch.float64),
+                torch.tensor(1e-6, dtype=torch.float64),
+            ),
+        )
+        regional_linear_temporal_kernel.ref_year = torch.tensor(
+            0.0, dtype=torch.float64
+        )
+        regional_linear_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
+        regional_linear_spatial_kernel.set_prior(
+            "s_lengthscale",
+            dist.Uniform(
+                torch.tensor(0.01, dtype=torch.float64),
+                torch.tensor(0.5, dtype=torch.float64),
+            ),
+        )
+        regional_linear_kernel = PSTHM.kernels.Product(
+            regional_linear_temporal_kernel, regional_linear_spatial_kernel
+        )
 
-    # site specific datum correction
-    sp_whitenoise_kernel = PSTHM.kernels.WhiteNoise_SP(input_dim=1, sp=False, geo=True)
-    sp_whitenoise_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-7, dtype=torch.float64),
-            torch.tensor(1.0, dtype=torch.float64),
-        ),
-    )
+        # define regionally non-linar spatio-temporal kernel
+        regional_nl_temporal_kernel = PSTHM.kernels.Matern32(
+            input_dim=1, lengthscale=global_kernel.lengthscale, geo=False
+        )
+        regional_nl_temporal_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-6, dtype=torch.float64),
+                torch.tensor(100.0, dtype=torch.float64),
+            ),
+        )
+        regional_nl_temporal_kernel.set_prior(
+            "lengthscale",
+            dist.Uniform(
+                torch.tensor(100.0, dtype=torch.float64),
+                torch.tensor(20000.0, dtype=torch.float64),
+            ),
+        )
+        regional_nl_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
+        regional_nl_spatial_kernel.set_prior(
+            "s_lengthscale",
+            dist.Uniform(
+                torch.tensor(0.01, dtype=torch.float64),
+                torch.tensor(0.5, dtype=torch.float64),
+            ),
+        )
+        regional_nl_kernel = PSTHM.kernels.Product(
+            regional_nl_temporal_kernel, regional_nl_spatial_kernel
+        )
 
-    # whitenoise error
-    whitenoise_kernel = PSTHM.kernels.WhiteNoise(input_dim=1)
-    whitenoise_kernel.set_prior(
-        "variance",
-        dist.Uniform(
-            torch.tensor(1e-7, dtype=torch.float64),
-            torch.tensor(1.0, dtype=torch.float64),
-        ),
-    )
+        # define locally non-linar spatio-temporal kernel
+        local_nl_temporal_kernel = PSTHM.kernels.Matern32(
+            input_dim=1, lengthscale=global_kernel.lengthscale, geo=False
+        )
+        local_nl_temporal_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-6, dtype=torch.float64),
+                torch.tensor(1.0, dtype=torch.float64),
+            ),
+        )
+        local_nl_temporal_kernel.set_prior(
+            "lengthscale",
+            dist.Uniform(
+                torch.tensor(100.0, dtype=torch.float64),
+                torch.tensor(20000.0, dtype=torch.float64),
+            ),
+        )
+        local_nl_spatial_kernel = PSTHM.kernels.Matern21(input_dim=1, geo=True)
+        local_nl_spatial_kernel.set_prior(
+            "s_lengthscale",
+            dist.Uniform(
+                torch.tensor(0.001, dtype=torch.float64),
+                torch.tensor(0.01, dtype=torch.float64),
+            ),
+        )
+        local_nl_kernel = PSTHM.kernels.Product(
+            local_nl_temporal_kernel, local_nl_spatial_kernel
+        )
 
-    combined_sp_kernel = PSTHM.kernels.Sum(global_kernel, regional_linear_kernel)
-    combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, regional_nl_kernel)
-    combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, local_nl_kernel)
-    combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, sp_whitenoise_kernel)
-    combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, whitenoise_kernel)
+        # site specific datum correction
+        sp_whitenoise_kernel = PSTHM.kernels.WhiteNoise_SP(
+            input_dim=1, sp=False, geo=True
+        )
+        sp_whitenoise_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-7, dtype=torch.float64),
+                torch.tensor(1.0, dtype=torch.float64),
+            ),
+        )
 
-    gpr = PSTHM.model.GPRegression_V(
-        torch.tensor(X_all, dtype=torch.float64),
-        torch.tensor(y, dtype=torch.float64),
-        combined_sp_kernel,
-        noise=torch.tensor(rsl_sigma.values, dtype=torch.float64),
-        jitter=1e-5,
-    )
+        # whitenoise error
+        whitenoise_kernel = PSTHM.kernels.WhiteNoise(input_dim=1)
+        whitenoise_kernel.set_prior(
+            "variance",
+            dist.Uniform(
+                torch.tensor(1e-7, dtype=torch.float64),
+                torch.tensor(1.0, dtype=torch.float64),
+            ),
+        )
+
+        combined_sp_kernel = PSTHM.kernels.Sum(global_kernel, regional_linear_kernel)
+        combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, regional_nl_kernel)
+        combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, local_nl_kernel)
+        combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, sp_whitenoise_kernel)
+        combined_sp_kernel = PSTHM.kernels.Sum(combined_sp_kernel, whitenoise_kernel)
+
+        # Observation noise in `GPRegression_V` is variance; add a tiny floor for stability.
+        rsl_sigma_t = torch.tensor(rsl_sigma.values, dtype=torch.float64)
+        noise_floor_var = torch.tensor(1e-12, dtype=torch.float64)
+        noise_var = torch.clamp(rsl_sigma_t**2, min=noise_floor_var)
+
+        gpr = PSTHM.model.GPRegression_V(
+            torch.tensor(X_all, dtype=torch.float64),
+            torch.tensor(y, dtype=torch.float64),
+            combined_sp_kernel,
+            noise=noise_var,
+            jitter=float(jitter),
+        )
+
+        return (
+            gpr,
+            global_kernel,
+            regional_linear_temporal_kernel,
+            regional_linear_spatial_kernel,
+            regional_nl_temporal_kernel,
+            regional_nl_spatial_kernel,
+            local_nl_temporal_kernel,
+            local_nl_spatial_kernel,
+            sp_whitenoise_kernel,
+            whitenoise_kernel,
+        )
+
     print("-----------------------------------")
     print("Model implementation complete successfully")
 
-    gpr, track_list = PSTHM.opti.SVI_NI_optm(
-        gpr,
-        x_sigma=torch.tensor(rsl_age_sigma.values, dtype=torch.float64),
-        num_iteration=iteration,
-        lr=0.2,
-    )
+    last_err = None
+    jitters_tried = (1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0)
+    for jitter in jitters_tried:
+        print(f"Trying jitter={jitter:g}")
+        try:
+            (
+                gpr,
+                global_kernel,
+                regional_linear_temporal_kernel,
+                regional_linear_spatial_kernel,
+                regional_nl_temporal_kernel,
+                regional_nl_spatial_kernel,
+                local_nl_temporal_kernel,
+                local_nl_spatial_kernel,
+                sp_whitenoise_kernel,
+                whitenoise_kernel,
+            ) = _build_gpr(jitter=jitter)
+
+            gpr, track_list = PSTHM.opti.SVI_NI_optm(
+                gpr,
+                x_sigma=torch.tensor(rsl_age_sigma.values, dtype=torch.float64),
+                num_iteration=iteration,
+                lr=0.2,
+            )
+            print(f"Optimization succeeded with jitter={jitter:g}")
+            last_err = None
+            break
+        except RuntimeError as e:
+            # Torch raises `_LinAlgError` (a RuntimeError subclass) for non-PD Cholesky.
+            if (
+                "cholesky" in str(e).lower()
+                or "not positive-definite" in str(e).lower()
+            ):
+                print(
+                    f"Cholesky failed at jitter={jitter:g}; retrying with larger jitter..."
+                )
+                last_err = e
+                continue
+            raise
+
+    if last_err is not None:
+        raise RuntimeError(
+            "Cholesky failed for all jitter values tried: "
+            + ", ".join(f"{j:g}" for j in jitters_tried)
+        ) from last_err
 
     optimized_params = {}
 
