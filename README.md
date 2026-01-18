@@ -7,7 +7,7 @@
 
 By [Rutgers Earth System Science & Policy Lab](https://earthscipol.net/)
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15609460.svg)](https://doi.org/10.5281/zenodo.15609460)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.12730140.svg)](https://doi.org/10.5281/zenodo.12730140)
 
 ## Project overview
 This repository contains the Jupyter Notebook based tutorials for PaleoSTeHM project, which will develop a framework for spatiotemporal hierarchical modeling of paleodata that builds upon modern, scalable software infrastructure for machine learning. By leveraging an existing, widely used machine-learning framework at the base level, PaleoSTeHM will be built to take advantage of current and future computational advances without modifications to the user-facing product. It will facilitate the incorporation of complex likelihood structures, including the embedding of physical simulation models, and thus pave the way for further advances in paleo-modeling. 
@@ -19,7 +19,7 @@ The work described in this repository is documented in the following publication
 **DOI:** [doi.org/10.5194/gmd-18-2609-2025](https://doi.org/10.5194/gmd-18-2609-2025)
 
 
-Please note that this repository is managed by Yucheng Lin and Robert Kopp. If you have any questions please contact Yucheng: yc.lin@rutgers.edu. 
+Please note that this repository is managed by Yucheng Lin and Robert Kopp. If you have any questions please contact Yucheng: yucheng.lin@csiro.au. 
 
 
 ## Installation
